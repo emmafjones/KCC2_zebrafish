@@ -1,0 +1,272 @@
+---
+title: "KCC2zebrafish_FarnsworthData"
+author: "Emma Jones"
+date: "4/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## KCC2 zebrafish Single Cell RNA-sequencing analysis
+
+This is a script for the analysis of Farnsworth et al. 2019 (https://www.sciencedirect.com/science/article/pii/S0012160619304919) scRNA-seq data using Seurat for the 2022 KCC2 zebrafish paper. 
+
+First you need to load in packages. Installing with install.packages() may be necessary if you have not used them before.
+
+```{r load packages}
+
+library(Seurat)
+library(SeuratObject)
+library(tidyverse)
+library(ggtext)
+library(readxl)
+library(patchwork)
+
+```
+
+Data was download from this link: https://www.dropbox.com/s/m4igp74wjvjjwul/Farnsworth_2019.rds?dl=0 and put into the working directory for this project. Raw data, if desired, are avilable at NCBI SRA PRJNA564810, although that will require additional pre-processing steps, such as CellRanger.
+
+Keep in mind that this paper is from 2019, so you'll need to update the Seurat object to Seurat v3. I'm using Seurat v4 but I think it is compatible with v3 objects.
+
+```{r load in data}
+
+Farnsworth_2019 <- readRDS("../Farnsworth_data/Farnsworth_2019.rds")
+
+Farnsworth_2019 <- UpdateSeuratObject(Farnsworth_2019)
+
+```
+
+I did an exploratory data analysis just to see where kcc2 and nkcc1 were being expressed by looking at the slc12a5b and slc12a2 genes.
+
+You can also look with the UCSC browser, but that does not include overlap of features, which is what we are ultimately interested in.
+
+```{r explore data}
+DimPlot(Farnsworth_2019, group.by = "sample_name")
+
+FeaturePlot(Farnsworth_2019, features = "slc12a5b")
+FeaturePlot(Farnsworth_2019, features = "slc12a5a")
+FeaturePlot(Farnsworth_2019, features = "slc12a2")
+
+FeaturePlot(Farnsworth_2019, features = c("slc12a5b", "slc12a5a", "slc12a2"))
+```
+
+We need some of the metadata from the supplementary files of the original paper if we want to use the same cluster annotations.
+
+```{r get metadata}
+cluster_metadata <- read_excel("~/Downloads/1-s2.0-S0012160619304919-mmc7.xlsx")
+
+head(cluster_metadata)
+
+#next, add metadata columns to seurat object
+
+germ_layer <- cluster_metadata[,1:2]
+
+tissue <- cluster_metadata[,c(1,3)]
+
+cell_type <- cluster_metadata[,c(1,4)]
+
+cluster_ident <- Farnsworth_2019@meta.data[["ClusterNames"]]
+
+cluster_ident <- as.data.frame(cluster_ident)
+
+#add germ layer metadata
+germ_layer$`Cluster ID` <- as.character(germ_layer$`Cluster ID`)
+
+germ_metadata <- left_join(cluster_ident, germ_layer, by = c("cluster_ident" = "Cluster ID"))
+
+Farnsworth_2019 <- AddMetaData(object = Farnsworth_2019, 
+                               metadata = germ_metadata$`Germ Layer`, col.name = "germ.layer")
+
+#cell type
+cell_type$`Cluster ID` <- as.character(cell_type$`Cluster ID`)
+
+cell_type_metadata <- left_join(cluster_ident, cell_type, by = c("cluster_ident" = "Cluster ID"))
+
+Farnsworth_2019 <- AddMetaData(object = Farnsworth_2019, 
+                               metadata = cell_type_metadata$`Cell type`, col.name = "cell.type")
+#tissue type
+tissue$`Cluster ID` <- as.character(tissue$`Cluster ID`)
+
+tissue_metadata <- left_join(cluster_ident, tissue, by = c("cluster_ident" = "Cluster ID"))
+
+Farnsworth_2019 <- AddMetaData(object = Farnsworth_2019, 
+                               metadata = tissue_metadata$`Tissue`, col.name = "tissue")
+#save object with metadata
+
+saveRDS(Farnsworth_2019, "../Farnsworth_data/Farnsworth_obj_metadata.rds")
+
+```
+
+Overall, expression appears to be lower and more brain specific in slc12a5b than in slc12a2. slc12a5b is more similar to human SLC12A5 than slc12a5a.
+
+```{r plot with new cluster labels}
+
+VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "tissue")
+
+DimPlot(Farnsworth_2019, group.by = "tissue")
+DimPlot(Farnsworth_2019, group.by = "tissue", label = TRUE, repel = TRUE) + NoLegend()
+
+DimPlot(Farnsworth_2019, group.by = "germ.layer")
+
+DimPlot(Farnsworth_2019, group.by = "cell.type")
+DimPlot(Farnsworth_2019, label = TRUE, group.by = "cell.type", label.box = TRUE, repel = TRUE) + NoLegend()
+
+DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE) + NoLegend()
+
+```
+
+The goal of this overlap graph is to see the cell types that kcc2 is found in. We decide to look at overlap with dopamine neurons. We will use the dopamine neuron marker tyrosine hydroxylase.
+
+```{r feature plots overlap}
+
+FeaturePlot(Farnsworth_2019, features = c("slc12a5b", "th"), blend = T)
+
+```
+This plot is hard to see/read, so I decide to subset neurons only based on metadata labeling.
+
+```{r subset neurons and plot}
+
+#you can pull out cell types and tissues if you wish to see optins for more subsets
+cell_types_all <- unique(Farnsworth_2019@meta.data[["cell.type"]])
+tissues_all <- unique(Farnsworth_2019@meta.data[["tissue"]])
+
+#subset neurons here
+neurons <- subset(x = Farnsworth_2019, subset = cell.type == "Neuron")
+
+#plot slc12a5b
+FeaturePlot(neurons, features = c("slc12a5b"))
+
+#blend slc12a5b and th
+plot <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25)
+
+plot
+```
+
+This 4-panel plot is hard to interpret. We need to change label, organize, and pull out the plot of interest.
+
+```{r cleaning up the plots}
+#pulling out specific overlap plot and legend
+kcc2_th_plot <- plot[[3]]
+legend <- plot[[4]]
+
+#try on title
+kcc2_th_plot + ggtitle("slc12a5b and th coexpression")
+
+#changing labels
+kcc2_th_plot + labs(
+  title = "**Coexpression of <span style = 'color: red;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
+  <span style='font-size:11pt'>scRNA-seq data from Fransworth et al. 2020",
+  x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
+) +
+  theme(plot.title = element_markdown())
+
+#further tweaking
+final <- kcc2_th_plot + labs(
+  title = "**Coexpression of <span style = 'color: red;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
+  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020",
+  x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
+) +
+  theme_minimal() +
+  NoLegend() +
+  theme(
+    plot.title = element_markdown(lineheight = 1.1)
+  )
+
+final
+
+```
+
+The overlap plot looks pretty good at this point, but it is not very colorblind friendly, and could be zoomed in more to better see slc12a5b and th positive cells.
+
+We can make an inset with patchwork using the inset.element() function.
+
+```{r make colorblind-friendly}
+plot <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, cols = c("blue", "green"))
+
+plot
+
+kcc2_th_plot <- plot[[3]]
+
+final <- kcc2_th_plot + labs(
+  title = "**Coexpression of <span style = 'color: blue;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
+  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020",
+  x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
+) +
+  theme_minimal() +
+  NoLegend() +
+  theme(
+    plot.title = element_markdown(lineheight = 1.1)
+  )
+
+final
+
+```
+
+Now, to create the inset plot
+
+```{r inset plot}
+
+inset_clusters <- subset(neurons, idents = c("113","27","13", "136", "112", "136", "25", "177"))
+
+DimPlot(inset_clusters)
+
+plot2 <- FeaturePlot(inset_clusters, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, cols = c("blue", "green"))
+
+plot2
+
+inset_plot <- plot2[[3]] + theme(plot.title = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank())
+
+inset_plot
+```
+
+Using patchwork did not really give the desired plot with my inset. Maybe I just need to make a really big plot and screenshot part of interest. This is not the best method but is the quick and dirty version.
+
+```{r make big}
+
+plot_big <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, pt.size = 2, cols = c("blue", "green"))
+
+overlap_big <- plot_big[[3]]
+
+final_big <- overlap_big + labs(
+  title = "**Coexpression of <span style = 'color: blue;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
+  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020",
+  x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
+) +
+  theme_minimal() +
+  NoLegend() +
+  theme(
+    plot.title = element_markdown(lineheight = 1.1)
+  )
+
+```
+
+```{r cell types panel}
+
+celltype_plot <- DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE, label.size = 2.8) + labs(title = "Cell Type Annotations", x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)") + theme_minimal() + NoLegend()
+
+celltype_plot
+
+ggsave("celltypes_farnsworth.jpeg", plot = celltype_plot, width = 6, height = 5, units = "in")
+
+```
+
+Save your figure when you are satisfied with appearance!
+
+```{save plot}
+
+ggsave("slc12a5b_th_coexpression.jpeg", plot = final) #you may need to edit your dimensions
+
+ggsave("slc12a5b_th_coexpression1.jpeg", plot = final, width = 6, height = 5, units = "in")
+
+```
+
+
+
+
+```{r session info}
+
+sessionInfo()
+
+```
