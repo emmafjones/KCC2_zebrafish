@@ -1,7 +1,7 @@
 ---
 title: "KCC2zebrafish_FarnsworthData"
 author: "Emma Jones"
-date: "4/21/2022"
+date: "8/3/2022"
 output: html_document
 ---
 
@@ -9,9 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## KCC2 zebrafish Single Cell RNA-sequencing analysis
+## kcc2 Zebrafish Single Cell RNA-sequencing analysis
 
-This is a script for the analysis of Farnsworth et al. 2019 (https://www.sciencedirect.com/science/article/pii/S0012160619304919) scRNA-seq data using Seurat for the 2022 KCC2 zebrafish paper. 
+This is a script for the analysis of Farnsworth et al. 2019 (https://www.sciencedirect.com/science/article/pii/S0012160619304919) scRNA-seq data using Seurat for the 2022 kcc2 zebrafish paper. The goal of this analysis was to visualize the gene expression of the gene encoding kcc2 in embryonic zebrafish brain, and look at the cell types it is found in.
+
+### Load in Packages
 
 First you need to load in packages. Installing with install.packages() may be necessary if you have not used them before.
 
@@ -26,7 +28,9 @@ library(patchwork)
 
 ```
 
-Data was download from this link: https://www.dropbox.com/s/m4igp74wjvjjwul/Farnsworth_2019.rds?dl=0 and put into the working directory for this project. Raw data, if desired, are avilable at NCBI SRA PRJNA564810, although that will require additional pre-processing steps, such as CellRanger.
+### Load in Data
+
+Data was download from this link: https://www.dropbox.com/s/m4igp74wjvjjwul/Farnsworth_2019.rds?dl=0 and put into the working directory for this project. Raw data, if desired, are available at NCBI SRA PRJNA564810, although that will require additional pre-processing steps, such as CellRanger from 10X.
 
 Keep in mind that this paper is from 2019, so you'll need to update the Seurat object to Seurat v3. I'm using Seurat v4 but I think it is compatible with v3 objects.
 
@@ -37,6 +41,8 @@ Farnsworth_2019 <- readRDS("../Farnsworth_data/Farnsworth_2019.rds")
 Farnsworth_2019 <- UpdateSeuratObject(Farnsworth_2019)
 
 ```
+
+### Exploratory Analysis
 
 I did an exploratory data analysis just to see where kcc2 and nkcc1 were being expressed by looking at the slc12a5b and slc12a2 genes.
 
@@ -51,6 +57,8 @@ FeaturePlot(Farnsworth_2019, features = "slc12a2")
 
 FeaturePlot(Farnsworth_2019, features = c("slc12a5b", "slc12a5a", "slc12a2"))
 ```
+
+#### Getting Metadata
 
 We need some of the metadata from the supplementary files of the original paper if we want to use the same cluster annotations.
 
@@ -99,11 +107,18 @@ saveRDS(Farnsworth_2019, "../Farnsworth_data/Farnsworth_obj_metadata.rds")
 
 ```
 
-Overall, expression appears to be lower and more brain specific in slc12a5b than in slc12a2. slc12a5b is more similar to human SLC12A5 than slc12a5a.
+#### Examining kcc2 expression
+
+Overall, expression appears to be lower and more brain specific in slc12a5b than in slc12a2. We chose slc12a5b because it is more similar to human SLC12A5 than slc12a5a.
 
 ```{r plot with new cluster labels}
 
-VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "tissue")
+VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "tissue") + NoLegend()
+
+VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "cell.type") + NoLegend()
+VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "germ.layer") + NoLegend()
+
+VlnPlot(Farnsworth_2019, features = "slc12a5b", group.by = "sample_name") + NoLegend()
 
 DimPlot(Farnsworth_2019, group.by = "tissue")
 DimPlot(Farnsworth_2019, group.by = "tissue", label = TRUE, repel = TRUE) + NoLegend()
@@ -117,7 +132,11 @@ DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE) + N
 
 ```
 
-The goal of this overlap graph is to see the cell types that kcc2 is found in. We decide to look at overlap with dopamine neurons. We will use the dopamine neuron marker tyrosine hydroxylase.
+As expected slc12a5b is primarily expressed in neurons. It also appears to be expressed at all time points (24 hpf, 48 hpf, and 120 hpf).
+
+### Plot Overlap
+
+The goal of this overlap graph is to see the cell types that kcc2 is found in. We decide to look at overlap with dopaminergic neurons, which we also assayed in vivo. We will use the dopamine neuron marker tyrosine hydroxylase.
 
 ```{r feature plots overlap}
 
@@ -143,7 +162,6 @@ plot <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = 
 
 plot
 ```
-
 This 4-panel plot is hard to interpret. We need to change label, organize, and pull out the plot of interest.
 
 ```{r cleaning up the plots}
@@ -175,95 +193,53 @@ final <- kcc2_th_plot + labs(
   )
 
 final
-
 ```
-
-The overlap plot looks pretty good at this point, but it is not very colorblind friendly, and could be zoomed in more to better see slc12a5b and th positive cells.
-
-We can make an inset with patchwork using the inset.element() function.
+The overlap plot looks pretty good at this point, but it is not very colorblind friendly, and could be zoomed in more to better see slc12a5b and th positive cells. I also choose to remove the plot title so it can be moved to the legend in the manuscript.
 
 ```{r make colorblind-friendly}
-plot <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, cols = c("blue", "green"))
+
+plot <- FeaturePlot(neurons, features = c("slc12a5b", "th"), pt.size = 0.7, blend = T, order = T, blend.threshold = 0.25, cols = c("blue", "green"))
 
 plot
 
 kcc2_th_plot <- plot[[3]]
 
-final <- kcc2_th_plot + labs(
-  title = "**Coexpression of <span style = 'color: blue;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
-  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020",
+final <- kcc2_th_plot + labs( title = NULL,
   x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
-) +
-  theme_minimal() +
+) + 
+  theme_classic() +
   NoLegend() +
-  theme(
-    plot.title = element_markdown(lineheight = 1.1)
-  )
+  scale_x_continuous(limits = c(-10, 10)) +
+  scale_y_continuous(limits = c(-10, 10))
 
 final
 
+ggsave("slc12a5b_th_coexpression.png", plot = final, width = 6, height = 5, units = "in", dpi = 300)
 ```
+### Plot All Cell Types
 
-Now, to create the inset plot
+Another panel for figure 6 in the paper will show all annotated cell types as a point of reference and context for the slc12a5b and th overlap plot. I also save a larger version for the supplemental information.
 
-```{r inset plot}
+```{r cell types panel}
 
-inset_clusters <- subset(neurons, idents = c("113","27","13", "136", "112", "136", "25", "177"))
+celltype_plot <- DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE, label.size = 2.8) + labs(title = NULL, x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)") + theme_classic() + NoLegend()
 
-DimPlot(inset_clusters)
+ggsave("celltypes_farnsworth.png", plot = celltype_plot, width = 6, height = 5, units = "in", dpi = 300)
 
-plot2 <- FeaturePlot(inset_clusters, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, cols = c("blue", "green"))
-
-plot2
-
-inset_plot <- plot2[[3]] + theme(plot.title = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank())
-
-inset_plot
-```
-
-Using patchwork did not really give the desired plot with my inset. Maybe I just need to make a really big plot and screenshot part of interest. This is not the best method but is the quick and dirty version.
-
-```{r make big}
-
-plot_big <- FeaturePlot(neurons, features = c("slc12a5b", "th"), blend = T, order = T, blend.threshold = 0.25, pt.size = 2, cols = c("blue", "green"))
-
-overlap_big <- plot_big[[3]]
-
-final_big <- overlap_big + labs(
-  title = "**Coexpression of <span style = 'color: blue;'>slc12a5b</span> and <span style = 'color: green;'>th</span>**
-  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020",
-  x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)"
-) +
-  theme_minimal() +
-  NoLegend() +
+##large plot
+celltype_plot_big <- DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE, label.size = 3, pt.size = .1) + labs(title = "**All Cell Type Annotations**
+  <br><span style='font-size:11pt'>scRNA-seq data from Farnsworth et al. 2020", x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)") + theme_classic() + theme(axis.title = element_text(size=12), axis.text = element_text(size = 8)) +
   theme(
     plot.title = element_markdown(lineheight = 1.1)
   )
 
-```
-
-```{r cell types panel}
-
-celltype_plot <- DimPlot(Farnsworth_2019, group.by = "cell.type", label = TRUE, repel = TRUE, label.size = 2.8) + labs(title = "Cell Type Annotations", x = "Projection 1 (UMAP_1)", y = "Projection 2 (UMAP_2)") + theme_minimal() + NoLegend()
-
-celltype_plot
-
-ggsave("celltypes_farnsworth.jpeg", plot = celltype_plot, width = 6, height = 5, units = "in")
+ggsave("celltypes_farnsworth_big.png", plot = celltype_plot_big, width = 11, height = 6, units = "in", dpi = 300)
 
 ```
 
-Save your figure when you are satisfied with appearance!
+This concludes the basic analysis. Future directions could include a quantification of overlap with dopaminergic neurons as opposed to only visualization, or more detailed analyses looking at known proteins that do interact with kcc2.
 
-```{save plot}
-
-ggsave("slc12a5b_th_coexpression.jpeg", plot = final) #you may need to edit your dimensions
-
-ggsave("slc12a5b_th_coexpression1.jpeg", plot = final, width = 6, height = 5, units = "in")
-
-```
-
-
-
+#### Session Info
 
 ```{r session info}
 
